@@ -18,6 +18,24 @@ print_success() {
     echo -e "\e[32m[SUCCESS]\e[0m $1"
 }
 
+print_message() {
+    local type=$1
+    local message=$2
+    case $type in
+        "INFO")
+            echo -e "\033[1;32m[INFO]\033[0m $message"
+            ;;
+        "WARN")
+            echo -e "\033[1;33m[WARN]\033[0m $message"
+            ;;
+        "ERROR")
+            echo -e "\033[1;31m[ERROR]\033[0m $message"
+            ;;
+        *)
+            echo "$message"
+            ;;
+    esac
+}
 # Verificar permissões
 check_root() {
     if [ "$EUID" -ne 0 ]; then
