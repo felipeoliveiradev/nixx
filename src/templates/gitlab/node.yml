@@ -1,0 +1,49 @@
+# src/utils/templates/gitlab/node.yml
+stages:
+  - test
+  - build
+  - deploy
+
+variables:
+  NODE_VERSION: "18"
+
+test:
+  stage: test
+  image: node:${NODE_VERSION}
+  script:
+    - npm install
+    - npm test
+  cache:
+    paths:
+      - node_modules/
+
+build:
+  stage: build
+  image: node:${NODE_VERSION}
+  script:
+    - npm install
+    - npm run build
+  artifacts:
+    paths:
+      - dist/
+  cache:
+    paths:
+      - node_modules/
+
+deploy:staging:
+  stage: deploy
+  script:
+    - echo "Deploy to staging server"
+  environment:
+    name: staging
+  only:
+    - develop
+
+deploy:production:
+  stage: deploy
+  script:
+    - echo "Deploy to production server"
+  environment:
+    name: production
+  only:
+    - main

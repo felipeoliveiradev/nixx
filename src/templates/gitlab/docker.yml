@@ -1,0 +1,50 @@
+stages:
+  - test
+  - build
+  - deploy
+
+variables:
+  DOCKER_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+  DOCKER_TAG_LATEST: $CI_REGISTRY_IMAGE:latest
+
+build:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker build -t $DOCKER_IMAGE .
+    - docker push $DOCKER_IMAGE
+    - docker tag $DOCKER_IMAGE $DOCKER_TAG_LATEST
+    - docker push $DOCKER_TAG_LATEST
+  only:
+    - main
+    - develop
+
+test:
+  stage: test
+  script:
+    - echo "Running tests"
+  only:
+    - main
+    - develop
+
+deploy:staging:
+  stage: deploy
+  script:
+    - echo "Deploy to staging environment"
+  environment:
+    name: staging
+  only:
+    - develop
+
+deploy:production:
+  stage: deploy
+  script:
+    - echo "Deploy to production environment"
+  environment:
+    name: production
+  only:
+    - main

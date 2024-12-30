@@ -1,0 +1,48 @@
+stages:
+  - test
+  - build
+  - deploy
+
+variables:
+  PYTHON_VERSION: "3.9"
+
+test:
+  stage: test
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - pip install -r requirements.txt
+  script:
+    - pytest tests/
+    - flake8
+  cache:
+    paths:
+      - .pytest_cache/
+      - __pycache__/
+
+build:
+  stage: build
+  image: python:${PYTHON_VERSION}
+  script:
+    - pip install -r requirements.txt
+    - python setup.py bdist_wheel
+  artifacts:
+    paths:
+      - dist/*.whl
+
+deploy:staging:
+  stage: deploy
+  script:
+    - echo "Deploy to staging server"
+  environment:
+    name: staging
+  only:
+    - develop
+
+deploy:production:
+  stage: deploy
+  script:
+    - echo "Deploy to production server"
+  environment:
+    name: production
+  only:
+    - main
