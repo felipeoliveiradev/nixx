@@ -3,7 +3,7 @@
 # Nome do CLI
 CLI_NAME="nixx"
 INSTALL_DIR="/usr/local/bin"
-REPO_URL="https://github.com/felipeoliveiradev/nixx"
+REPO_URL="https://raw.githubusercontent.com/felipeoliveiradev/nixx/main"
 
 # Funções de ajuda
 print_info() {
