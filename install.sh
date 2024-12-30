@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Nome do CLI e diretórios
+# Nome do CLI
 CLI_NAME="nixx"
 INSTALL_DIR="/usr/local/bin"
-SRC_DIR="$(pwd)" # Diretório atual (onde está o projeto)
+REPO_URL="https://github.com/felipeoliveiradev/nixx"
 
 # Funções de ajuda
 print_info() {
@@ -48,28 +48,18 @@ install_dependencies() {
 
 # Copiar arquivos
 install_cli() {
-    print_info "Instalando $CLI_NAME em $INSTALL_DIR..."
+    print_message "INFO" "Baixando o CLI $CLI_NAME..."
 
-    # Criar diretório, se não existir
-    mkdir -p "$INSTALL_DIR"
+    curl -fsSL "$REPO_URL/$CLI_NAME.sh" -o "$INSTALL_DIR/$CLI_NAME"
+    if [ $? -ne 0 ]; then
+        print_message "ERROR" "Falha ao baixar o CLI. Verifique o URL: $REPO_URL"
+        exit 1
+    fi
 
-    # Copiar script principal
-    cp "$SRC_DIR/nixx-cli.sh" "$INSTALL_DIR/$CLI_NAME"
-
-    # Garantir permissões de execução
+    print_message "INFO" "Configurando permissões para o CLI..."
     chmod +x "$INSTALL_DIR/$CLI_NAME"
 
-    print_success "$CLI_NAME instalado com sucesso!"
-}
-
-# Criar link simbólico (opcional)
-create_symlink() {
-    if [ -f "/usr/bin/$CLI_NAME" ]; then
-        print_info "Link simbólico já existe em /usr/bin/$CLI_NAME."
-    else
-        ln -s "$INSTALL_DIR/$CLI_NAME" "/usr/bin/$CLI_NAME"
-        print_success "Link simbólico criado em /usr/bin/$CLI_NAME."
-    fi
+    print_message "INFO" "$CLI_NAME foi instalado com sucesso em $INSTALL_DIR/$CLI_NAME"
 }
 
 # Mensagem de conclusão
@@ -85,7 +75,6 @@ main() {
     check_root
     install_dependencies
     install_cli
-    create_symlink
     show_completion_message
 }
 
