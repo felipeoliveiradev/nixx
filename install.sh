@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Nome do CLI e diretórios
-CLI_NAME="nixx-cli"
+CLI_NAME="nixx"
 INSTALL_DIR="/usr/local/bin"
 SRC_DIR="$(pwd)" # Diretório atual (onde está o projeto)
 
