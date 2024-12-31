@@ -295,9 +295,6 @@ main() {
         "list")
             handle_list "${@:2}"
             ;;
-        "logs")
-            handle_logs "${@:2}"
-            ;;
         "network")
             handle_network "${@:2}"
             ;;

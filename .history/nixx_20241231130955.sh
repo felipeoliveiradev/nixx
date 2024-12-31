@@ -295,9 +295,6 @@ main() {
         "list")
             handle_list "${@:2}"
             ;;
-        "logs")
-            handle_logs "${@:2}"
-            ;;
         "network")
             handle_network "${@:2}"
             ;;
@@ -318,9 +315,6 @@ main() {
             ;;
         "ports")
             handle_ports "${@:2}"
-            ;;
-        "credentials")
-            handle_credentials "$2"
             ;;
         "pipeline")
             handle_pipeline "${@:2}"
