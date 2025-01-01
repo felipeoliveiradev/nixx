@@ -83,7 +83,7 @@ download_files() {
     log "Baixando arquivos..."
 
     # Clone do repositório
-    git clone https://github.com/seu-usuario/nixx-cli.git /tmp/nixx-cli
+    git clone https://github.com/felipeoliveiradev/nixx.git /tmp/nixx-cli
 
     # Mover arquivos
     cp -r /tmp/nixx-cli/* "$INSTALL_DIR/"
@@ -159,7 +159,7 @@ show_completion() {
     echo "Para começar, execute:"
     echo "  nixx --help    # Ver comandos disponíveis"
     echo "  nixx install main    # Configurar node principal"
-    echo -e "\nDocumentação: https://github.com/seu-usuario/nixx-cli\n"
+    echo -e "\nDocumentação: https://github.com/felipeoliveiradev/nixx\n"
 }
 
 # Função principal

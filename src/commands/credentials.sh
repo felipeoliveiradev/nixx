@@ -1,4 +1,3 @@
-# src/commands/credentials.sh
 #!/bin/bash
 
 # Obter senha inicial do GitLab
@@ -9,7 +8,7 @@ get_gitlab_credentials() {
     if ! docker ps | grep -q gitlab; then
         print_error "Container do GitLab não está rodando"
         return 1
-    }
+    fi
 
     print_info "Credenciais padrão do GitLab:"
     print_info "Usuário: root"
@@ -50,7 +49,6 @@ get_grafana_credentials() {
     print_info "URL de acesso: http://${grafana_url}"
 }
 
-
 # Redefinir senha do GitLab
 reset_gitlab_password() {
     local new_password=$1
@@ -61,7 +59,7 @@ reset_gitlab_password() {
     if ! docker ps | grep -q gitlab; then
         print_error "Container do GitLab não está rodando"
         return 1
-    }
+    fi
 
     # Redefinir a senha do root via Rails console
     docker exec -it gitlab gitlab-rails runner "
@@ -88,7 +86,7 @@ reset_portainer_password() {
     if ! docker ps | grep -q portainer; then
         print_error "Container do Portainer não está rodando"
         return 1
-    }
+    fi
 
     # Parar o container atual
     docker stop portainer
@@ -122,7 +120,7 @@ reset_grafana_password() {
     if ! docker ps | grep -q grafana; then
         print_error "Container do Grafana não está rodando"
         return 1
-    }
+    fi
 
     # Redefinir senha via API
     docker exec -it grafana grafana-cli admin reset-admin-password "$new_password"

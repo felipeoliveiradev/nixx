@@ -1,4 +1,3 @@
-# src/commands/logs.sh
 #!/bin/bash
 
 # Mostrar logs de um serviço
@@ -13,7 +12,7 @@ show_logs() {
     if ! docker service ps $service >/dev/null 2>&1; then
         print_error "Serviço não encontrado: $service"
         return 1
-    }
+    fi
 
     if [ "$follow" = "true" ]; then
         docker service logs --follow $service
@@ -33,7 +32,7 @@ export_logs() {
     if ! docker service ps $service >/dev/null 2>&1; then
         print_error "Serviço não encontrado: $service"
         return 1
-    }
+    fi
 
     docker service logs $service > "$output_file"
     print_success "Logs exportados para: $output_file"
@@ -49,7 +48,7 @@ clean_logs() {
     if ! docker service ps $service >/dev/null 2>&1; then
         print_error "Serviço não encontrado: $service"
         return 1
-    }
+    fi
 
     docker service update --force $service
     print_success "Logs do serviço $service foram limpos"
