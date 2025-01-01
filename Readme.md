@@ -51,7 +51,7 @@ Nixx CLI é uma ferramenta de linha de comando que simplifica o gerenciamento de
 
 ### Instalação Automática
 ```bash
-curl -fsSL https://raw.githubusercontent.com/nixx-cli/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/felipeoliveiradev/nixx/main/install.sh | sudo bash
 ```
 
 ### Instalação Manual
