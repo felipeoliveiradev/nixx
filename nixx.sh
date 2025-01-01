@@ -29,7 +29,6 @@ load_modules() {
     local module_type=$1
     local module_dir="$BASE_DIR/src/$module_type"
     
-    # Mostrar mensagem apenas na primeira execução
     if [ ! -f "$FIRST_RUN_FILE" ]; then
         echo -e "${BLUE}[INFO]${NC} Carregando módulos de $module_type..."
     fi
@@ -59,7 +58,6 @@ handle_command() {
         "handle_$command" "$@"
     else
         echo -e "${RED}[ERROR]${NC} Comando desconhecido: $command"
-        show_help
         return 1
     fi
 }

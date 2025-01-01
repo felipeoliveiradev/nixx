@@ -49,7 +49,7 @@ check_requirements() {
     fi
 
     # Verificar dependências
-    local deps=("curl" "git" "docker" "jq")
+    local deps=("curl" "git" "docker" "jq" "iftop")
     local missing=()
 
     for dep in "${deps[@]}"; do
@@ -64,7 +64,7 @@ check_requirements() {
         apt-get update
         apt-get install -y ${missing[@]}
     fi
-
+    
     success "Requisitos verificados com sucesso"
 }
 
@@ -118,16 +118,13 @@ EOF
     success "CLI configurado com sucesso"
 }
 
-# Verificar instalação
 verify_installation() {
     log "Verificando instalação..."
 
-    # Testar comando
     if ! command -v nixx &> /dev/null; then
         error "Instalação falhou: comando 'nixx' não encontrado"
     fi
 
-    # Verificar versão
     local version=$(nixx --version)
     if [ "$version" != "$VERSION" ]; then
         error "Versão incorreta instalada"
@@ -136,7 +133,6 @@ verify_installation() {
     success "Instalação verificada com sucesso"
 }
 
-# Configuração Docker (opcional)
 setup_docker() {
     if ! command -v docker &> /dev/null; then
         warning "Docker não encontrado. Deseja instalar? (s/n)"
@@ -153,7 +149,6 @@ setup_docker() {
     fi
 }
 
-# Mensagem final
 show_completion() {
     echo -e "\n${GREEN}=== Nixx CLI instalado com sucesso! ===${NC}\n"
     echo "Para começar, execute:"
@@ -162,7 +157,6 @@ show_completion() {
     echo -e "\nDocumentação: https://github.com/felipeoliveiradev/nixx\n"
 }
 
-# Função principal
 main() {
     echo -e "${BLUE}=== Instalador Nixx CLI v${VERSION} ===${NC}\n"
 
@@ -175,5 +169,4 @@ main() {
     show_completion
 }
 
-# Executar
 main
