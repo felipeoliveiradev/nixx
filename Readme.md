@@ -57,7 +57,7 @@ curl -fsSL https://raw.githubusercontent.com/felipeoliveiradev/nixx/main/install
 ### Instalação Manual
 
 # Download do instalador
-wget https://raw.githubusercontent.com/seu-usuario/nixx-cli/main/install.sh
+wget https://raw.githubusercontent.com/felipeoliveiradev/nixx/main/install.sh
 
 # Tornar executável
 chmod +x install.sh
