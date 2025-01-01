@@ -51,29 +51,19 @@ Nixx CLI é uma ferramenta de linha de comando que simplifica o gerenciamento de
 
 ### Instalação Automática
 ```bash
-curl -fsSL https://raw.githubusercontent.com/nixx-cli/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/nixx-cli/main/install.sh | sudo bash
 ```
 
 ### Instalação Manual
-```bash
-# Clone o repositório
-git clone https://github.com/seu-usuario/nixx-cli.git
 
-# Entre no diretório
-cd nixx-cli
+# Download do instalador
+wget https://raw.githubusercontent.com/seu-usuario/nixx-cli/main/install.sh
 
-# Instale as dependências
-sudo ./scripts/install-deps.sh
+# Tornar executável
+chmod +x install.sh
 
-# Torne executável
-chmod +x nixx-cli.sh
-
-# Crie o link simbólico
-sudo ln -s $(pwd)/nixx-cli.sh /usr/local/bin/nixx
-
-# Verifique a instalação
-nixx --version
-```
+# Executar instalador
+sudo ./install.sh
 
 ### Pós-instalação
 ```bash
