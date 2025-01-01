@@ -12,9 +12,9 @@ NC='\033[0m'
 VERSION="1.0.0"
 
 # Diretórios
-INSTALL_DIR="/opt/nixx-cli"
+INSTALL_DIR="/opt/nixx"
 BIN_DIR="/usr/local/bin"
-CONFIG_DIR="$HOME/.nixx-cli"
+CONFIG_DIR="$HOME/.nixx"
 
 # Função para logs
 log() {
@@ -83,13 +83,13 @@ download_files() {
     log "Baixando arquivos..."
 
     # Clone do repositório
-    git clone https://github.com/felipeoliveiradev/nixx.git /tmp/nixx-cli
+    git clone https://github.com/felipeoliveiradev/nixx.git /tmp/nixx
 
     # Mover arquivos
-    cp -r /tmp/nixx-cli/* "$INSTALL_DIR/"
+    cp -r /tmp/nixx/* "$INSTALL_DIR/"
     
     # Limpar temporários
-    rm -rf /tmp/nixx-cli
+    rm -rf /tmp/nixx
 
     success "Arquivos baixados com sucesso"
 }
@@ -99,10 +99,10 @@ setup_cli() {
     log "Configurando Nixx CLI..."
 
     # Tornar executável
-    chmod +x "$INSTALL_DIR/nixx-cli.sh"
+    chmod +x "$INSTALL_DIR/nixx.sh"
 
     # Criar link simbólico
-    ln -sf "$INSTALL_DIR/nixx-cli.sh" "$BIN_DIR/nixx"
+    ln -sf "$INSTALL_DIR/nixx.sh" "$BIN_DIR/nixx"
 
     # Criar arquivo de configuração inicial
     cat > "$CONFIG_DIR/config.sh" << EOF
