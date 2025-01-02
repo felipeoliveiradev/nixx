@@ -23,6 +23,137 @@ get_server_ip() {
     echo "$ip"
 }
 
+
+setup_gitlab_webhook() {
+    local gitlab_token=$1
+    local source_repo=$2
+    local webhook_url=$3
+    local server_ip=$(get_server_ip)
+
+    print_info "Configurando webhook no GitLab para $source_repo..."
+
+    # Obter ID do projeto
+    local project_id
+    project_id=$(curl -s --header "PRIVATE-TOKEN: $gitlab_token" \
+        "http://$server_ip/api/v4/projects/${source_repo/\//%2F}" | \
+        jq -r '.id')
+
+    if [ -z "$project_id" ] || [ "$project_id" = "null" ]; then
+        print_error "Não foi possível encontrar o projeto no GitLab"
+        return 1
+    fi
+
+    # Criar webhook
+    curl -s --request POST --header "PRIVATE-TOKEN: $gitlab_token" \
+        "http://$server_ip/api/v4/projects/$project_id/hooks" \
+        --form "url=$webhook_url" \
+        --form "push_events=true" \
+        --form "tag_push_events=true"
+
+    print_success "Webhook do GitLab configurado com sucesso!"
+}
+
+# Função para configurar webhook no GitHub
+setup_github_webhook() {
+    local github_token=$1
+    local source_repo=$2
+    local webhook_url=$3
+
+    print_info "Configurando webhook no GitHub para $source_repo..."
+
+    curl -s -H "Authorization: token $github_token" \
+        "https://api.github.com/repos/$source_repo/hooks" \
+        -d "{
+            \"name\": \"web\",
+            \"active\": true,
+            \"events\": [\"push\", \"create\"],
+            \"config\": {
+                \"url\": \"$webhook_url\",
+                \"content_type\": \"json\"
+            }
+        }"
+
+    print_success "Webhook do GitHub configurado com sucesso!"
+}
+
+# Função para criar o serviço de webhook
+setup_webhook_service() {
+    local webhook_port="9000"
+    local webhook_service="/etc/systemd/system/repo-sync-webhook.service"
+    local webhook_script="$CONFIG_DIR/repo-sync-webhook.sh"
+
+    # Criar script do webhook
+    cat > "$webhook_script" << 'EOF'
+#!/bin/bash
+
+PORT="9000"
+LOGFILE="/var/log/repo-sync-webhook.log"
+
+# Função para processar o webhook
+handle_webhook() {
+    local payload="$1"
+    local source="$2"
+    
+    # Extrair informações do payload
+    if [ "$source" = "gitlab" ]; then
+        repo=$(echo "$payload" | jq -r '.project.path_with_namespace')
+    else
+        repo=$(echo "$payload" | jq -r '.repository.full_name')
+    fi
+    
+    # Executar sincronização
+    echo "[$(date)] Iniciando sincronização do repositório $repo" >> "$LOGFILE"
+    nixx backup sync "$source" "${source#git}" "$repo" "$DEST_REPO" "$GITLAB_TOKEN" "$GITHUB_TOKEN" >> "$LOGFILE" 2>&1
+}
+
+# Iniciar servidor web simples
+while true; do
+    echo -e "HTTP/1.1 200 OK\n\n$(date)" | nc -l -p $PORT | while read line; do
+        if [[ "$line" == *"POST"* ]]; then
+            # Ler o payload
+            length=$(grep "Content-Length:" -m1 | cut -d' ' -f2)
+            payload=$(dd bs=$length count=1 2>/dev/null)
+            
+            # Determinar fonte baseado no payload
+            if echo "$payload" | jq -e '.object_kind' >/dev/null 2>&1; then
+                handle_webhook "$payload" "gitlab" &
+            else
+                handle_webhook "$payload" "github" &
+            fi
+        fi
+    done
+done
+EOF
+
+    chmod +x "$webhook_script"
+
+    # Criar serviço systemd
+    cat > "$webhook_service" << EOF
+[Unit]
+Description=Repository Sync Webhook Service
+After=network.target
+
+[Service]
+ExecStart=$webhook_script
+Restart=always
+Environment=GITLAB_TOKEN=$1
+Environment=GITHUB_TOKEN=$2
+Environment=DEST_REPO=$3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Recarregar systemd e iniciar serviço
+    systemctl daemon-reload
+    systemctl enable repo-sync-webhook
+    systemctl start repo-sync-webhook
+
+    print_success "Serviço de webhook configurado na porta $webhook_port"
+    return 0
+}
+
+
 setup_github_backup() {
     local github_token=$1
     local github_repo=$2
@@ -545,6 +676,46 @@ clean_backups() {
     print_success "Limpeza concluída"
 }
 
+setup_sync_trigger() {
+    local source=$1      # gitlab ou github
+    local dest=$2        # github ou gitlab
+    local source_repo=$3
+    local dest_repo=$4
+    local gitlab_token=$5
+    local github_token=$6
+
+    if [ -z "$source_repo" ] || [ -z "$dest_repo" ] || [ -z "$gitlab_token" ] || [ -z "$github_token" ]; then
+        print_error "Todos os parâmetros são necessários"
+        print_info "Uso: nixx backup sync --trigger SOURCE DEST SOURCE_REPO DEST_REPO GITLAB_TOKEN GITHUB_TOKEN"
+        return 1
+    fi
+
+    # Obter IP público para webhook
+    print_info "Detectando IP do servidor..."
+    local server_ip=$(get_server_ip)
+    local webhook_url="http://$server_ip:9000/webhook"
+
+    # Configurar serviço de webhook
+    print_info "Configurando serviço de webhook..."
+    setup_webhook_service "$gitlab_token" "$github_token" "$dest_repo"
+
+    # Configurar webhook baseado na origem
+    case $source in
+        "gitlab")
+            setup_gitlab_webhook "$gitlab_token" "$source_repo" "$webhook_url"
+            ;;
+        "github")
+            setup_github_webhook "$github_token" "$source_repo" "$webhook_url"
+            ;;
+        *)
+            print_error "Origem inválida. Use 'gitlab' ou 'github'"
+            return 1
+            ;;
+    esac
+
+    print_success "Trigger de sincronização configurado com sucesso!"
+    print_info "Webhook URL: $webhook_url"
+}
 
 # Handler principal de backup
 handle_backup() {
@@ -572,7 +743,12 @@ handle_backup() {
             list_backups "$1"
             ;;
         "sync")
-            sync_repositories "$@"
+            if [ "$1" = "--trigger" ]; then
+                shift
+                setup_sync_trigger "$@"
+            else
+                sync_repositories "$@"
+            fi
             ;;
         "clean")
             clean_backups "${1:-7}"  # Default 7 days retention
@@ -587,15 +763,19 @@ handle_backup() {
             execute_backup_now "$@"
             ;;
         *)
-            print_error "Ação de backup desconhecida: $action"
+           print_error "Ação de backup desconhecida: $action"
             print_info "Ações disponíveis:"
-            print_info "  create [SERVIÇO]        - Criar backup"
-            print_info "  restore [SERVIÇO] [ARQ] - Restaurar backup"
-            print_info "  list [SERVIÇO]          - Listar backups"
-            print_info "  clean [DIAS]            - Limpar backups antigos"
-            print_info "  github-setup            - Configurar backup GitHub"
-            print_info "  github-list             - Listar backups no GitHub"
             print_info "  github-now              - Executar backup imediatamente"
+            print_info "  github-setup            - Configurar backup automático"
+            print_info "  github-list             - Listar backups no GitHub"
+            print_info "  sync SOURCE DEST REPO   - Sincronizar repositórios"
+            print_info ""
+            print_info "Exemplos de sync:"
+            print_info "  GitLab para GitHub:"
+            print_info "    nixx backup sync gitlab github grupo/projeto usuario/repo gitlab_token github_token"
+            print_info ""
+            print_info "  GitHub para GitLab:"
+            print_info "    nixx backup sync github gitlab usuario/repo grupo/projeto gitlab_token github_token"
             return 1
             ;;
     esac
