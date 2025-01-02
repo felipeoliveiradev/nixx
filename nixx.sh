@@ -29,24 +29,38 @@ load_modules() {
     local module_type=$1
     local module_dir="$BASE_DIR/src/$module_type"
     
-    if [ ! -f "$FIRST_RUN_FILE" ]; then
-        echo -e "${BLUE}[INFO]${NC} Carregando módulos de $module_type..."
-    fi
+    echo "[DEBUG] BASE_DIR = $BASE_DIR"
+    echo "[DEBUG] Tentando carregar módulos de: $module_dir"
     
     if [ ! -d "$module_dir" ]; then
-        echo -e "${RED}[ERROR]${NC} Diretório não encontrado: $module_dir"
+        echo "[DEBUG] ERRO: Diretório não encontrado: $module_dir"
         return 1
     fi
     
-    # Loop através de todos os arquivos .sh no diretório
+    # Listar todos os arquivos no diretório
+    echo "[DEBUG] Arquivos no diretório $module_dir:"
+    ls -la "$module_dir"
+    
     for file in "$module_dir"/*.sh; do
         if [ -f "$file" ]; then
-            if [ ! -f "$FIRST_RUN_FILE" ]; then
-                echo -e "${BLUE}[INFO]${NC} Carregando: $(basename "$file")"
+            echo "[DEBUG] Carregando: $file"
+            # Verificar se o arquivo tem permissão de execução
+            if [ ! -x "$file" ]; then
+                echo "[DEBUG] AVISO: Arquivo sem permissão de execução: $file"
+                chmod +x "$file"
             fi
             source "$file"
+            if [ $? -ne 0 ]; then
+                echo "[DEBUG] ERRO ao carregar $file"
+            else
+                echo "[DEBUG] $file carregado com sucesso"
+            fi
         fi
     done
+    
+    # Listar todas as funções carregadas que começam com "handle_"
+    echo "[DEBUG] Funções handle_ disponíveis:"
+    declare -F | grep "handle_"
 }
 
 # Handler principal de comandos
@@ -65,6 +79,7 @@ handle_command() {
 # Inicialização do CLI
 init_cli() {
     # Verificar primeira execução
+    echo $FIRST_RUN_FILE
     if [ ! -f "$FIRST_RUN_FILE" ]; then
         echo -e "${BLUE}[INFO]${NC} Inicializando Nixx CLI v$VERSION..."
         
@@ -89,7 +104,6 @@ init_cli() {
 main() {
     # Inicializar CLI
     init_cli
-
     # Verificar root para comandos que necessitam
     case $1 in
         "help"|"--help"|"-h"|"version"|"-v"|"--version"|"")

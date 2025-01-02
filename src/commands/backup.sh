@@ -14,10 +14,10 @@ setup_github_backup() {
         print_error "Token do GitHub e repositório são necessários"
         print_info "Uso: nixx backup github-setup TOKEN REPO [CRON_SCHEDULE]"
         print_info "Exemplo: nixx backup github-setup ghp_xxx123 usuario/repo '0 */6 * * *'"
-        return 1
-    }
+        return 1  # Mudado de exit 1 para return 1
+    fi  # Corrigido o fechamento do if
 
-    # Criar script de backup
+    # Resto do código permanece igual...
     local backup_script="$CONFIG_DIR/backup-gitlab.sh"
     cat > "$backup_script" << EOF
 #!/bin/bash
@@ -215,28 +215,42 @@ handle_backup() {
 
     case $action in
         "create")
+            if [ -z "$1" ]; then
+                print_error "Serviço não especificado"
+                print_info "Uso: nixx backup create [gitlab|portainer|prometheus|grafana]"
+                return 1
+            fi
             create_backup "$1"
             ;;
-        "setup")
-            setup_github_backup "$@"
-            ;;
-        "list")
-            list_github_backups "$@"
-            ;;
         "restore")
+            if [ -z "$1" ] || [ -z "$2" ]; then
+                print_error "Serviço ou arquivo não especificado"
+                print_info "Uso: nixx backup restore [SERVIÇO] [ARQUIVO]"
+                return 1
+            fi
             restore_backup "$1" "$2"
             ;;
         "list")
             list_backups "$1"
             ;;
         "clean")
-            clean_backups "$1"
+            clean_backups "${1:-7}"  # Default 7 days retention
+            ;;
+        "github-setup")
+            setup_github_backup "$@"
+            ;;
+        "github-list")
+            list_github_backups "$@"
             ;;
         *)
-            print_error "Ação desconhecida: $action"
-            echo "Ações disponíveis:"
-            echo "  setup TOKEN REPO [CRON] - Configurar backup automático"
-            echo "  list TOKEN REPO         - Listar backups"
+            print_error "Ação de backup desconhecida: $action"
+            print_info "Ações disponíveis:"
+            print_info "  create [SERVIÇO]        - Criar backup"
+            print_info "  restore [SERVIÇO] [ARQ] - Restaurar backup"
+            print_info "  list [SERVIÇO]          - Listar backups"
+            print_info "  clean [DIAS]            - Limpar backups antigos"
+            print_info "  github-setup            - Configurar backup GitHub"
+            print_info "  github-list             - Listar backups no GitHub"
             return 1
             ;;
     esac
