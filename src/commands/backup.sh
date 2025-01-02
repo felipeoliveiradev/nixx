@@ -5,61 +5,117 @@
 setup_github_backup() {
     local github_token=$1
     local github_repo=$2
-    local backup_interval=${3:-"0 */6 * * *"}  # Default: a cada 6 horas
+    local backup_interval=${3:-"0 */6 * * *"}
 
-    print_info "Configurando backup automático para GitHub..."
+    print_info "Configurando backup automático dos repositórios para GitHub..."
 
     # Verificar parâmetros
     if [ -z "$github_token" ] || [ -z "$github_repo" ]; then
         print_error "Token do GitHub e repositório são necessários"
         print_info "Uso: nixx backup github-setup TOKEN REPO [CRON_SCHEDULE]"
         print_info "Exemplo: nixx backup github-setup ghp_xxx123 usuario/repo '0 */6 * * *'"
-        return 1  # Mudado de exit 1 para return 1
-    fi  # Corrigido o fechamento do if
+        return 1
+    fi
 
-    # Resto do código permanece igual...
-    local backup_script="$CONFIG_DIR/backup-gitlab.sh"
-    cat > "$backup_script" << EOF
+    # Criar script de backup
+    local backup_script="$CONFIG_DIR/backup-gitlab-repos.sh"
+    cat > "$backup_script" << 'EOF'
 #!/bin/bash
 
 # Configurações
-BACKUP_DIR="$BACKUP_DIR"
+DATE=$(date +%Y%m%d_%H%M%S)
+TEMP_DIR="/tmp/gitlab-repos-backup-$DATE"
+GITLAB_URL="http://localhost"  # Ajuste para sua URL do GitLab
 GITHUB_TOKEN="$github_token"
 GITHUB_REPO="$github_repo"
-DATE=\$(date +%Y%m%d_%H%M%S)
 
-# Criar backup do GitLab
-echo "Criando backup do GitLab..."
-docker exec \$(docker ps -q -f name=gitlab) gitlab-backup create STRATEGY=copy
+# Função para log
+log_info() {
+    echo "[INFO] $1"
+}
+
+log_error() {
+    echo "[ERROR] $1" >&2
+}
 
 # Criar diretório temporário
-TEMP_DIR="/tmp/gitlab-backup-\$DATE"
-mkdir -p "\$TEMP_DIR"
+mkdir -p "$TEMP_DIR"
+cd "$TEMP_DIR" || exit 1
 
-# Copiar arquivos de backup
-cp "\$BACKUP_DIR"/gitlab_backup_* "\$TEMP_DIR/"
-cp /etc/gitlab/gitlab.rb "\$TEMP_DIR/gitlab.rb"
-cp /etc/gitlab/gitlab-secrets.json "\$TEMP_DIR/gitlab-secrets.json"
-
-# Inicializar repositório Git
-cd "\$TEMP_DIR"
+# Inicializar repositório Git para o backup
 git init
 git config user.email "gitlab-backup@local"
 git config user.name "GitLab Backup"
+git checkout -b main
 
-# Adicionar arquivos ao Git
+# Criar diretório para os repos
+mkdir -p repos
+
+# Obter token do GitLab do container
+GITLAB_TOKEN=$(docker exec $(docker ps -q -f name=gitlab) gitlab-rails runner "puts User.where(admin: true).first.personal_access_tokens.first.token" 2>/dev/null)
+
+if [ -z "$GITLAB_TOKEN" ]; then
+    log_error "Não foi possível obter o token do GitLab"
+    exit 1
+fi
+
+# Função para clonar um repositório e suas branches
+clone_repository() {
+    local project_id=$1
+    local project_path=$2
+    
+    log_info "Clonando repositório: $project_path"
+    
+    # Criar diretório para o projeto
+    mkdir -p "repos/$project_path"
+    cd "repos/$project_path" || return 1
+    
+    # Clonar o repositório
+    git clone --mirror "http://oauth2:${GITLAB_TOKEN}@localhost/${project_path}.git" .
+    
+    # Atualizar todas as refs
+    git remote update
+    
+    cd "$TEMP_DIR" || return 1
+}
+
+# Listar e clonar todos os repositórios
+log_info "Obtendo lista de projetos..."
+docker exec $(docker ps -q -f name=gitlab) gitlab-rails runner '
+  Project.all.each do |project|
+    puts "#{project.id}|#{project.path_with_namespace}"
+  end
+' | while IFS='|' read -r project_id project_path; do
+    clone_repository "$project_id" "$project_path"
+done
+
+# Verificar se há repositórios para backup
+if [ -z "$(ls -A repos)" ]; then
+    log_error "Nenhum repositório encontrado para backup"
+    cd /
+    rm -rf "$TEMP_DIR"
+    exit 1
+fi
+
+# Adicionar todos os repositórios ao Git
+cd "$TEMP_DIR" || exit 1
 git add .
-git commit -m "Backup GitLab - \$DATE"
+git commit -m "Backup dos repositórios GitLab - $DATE"
 
-# Configurar e enviar para GitHub
-git remote add origin https://\${GITHUB_TOKEN}@github.com/\${GITHUB_REPO}.git
-git push -u origin master --force
+# Enviar para GitHub
+git remote add origin "https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git"
+if ! git push -u origin main --force; then
+    log_error "Falha ao enviar para o GitHub"
+    cd /
+    rm -rf "$TEMP_DIR"
+    exit 1
+fi
 
 # Limpar
 cd /
-rm -rf "\$TEMP_DIR"
+rm -rf "$TEMP_DIR"
 
-echo "Backup concluído e enviado para GitHub"
+log_info "Backup dos repositórios concluído e enviado para GitHub com sucesso"
 EOF
 
     # Tornar script executável
@@ -67,7 +123,7 @@ EOF
 
     # Configurar cron
     print_info "Configurando cron job..."
-    (crontab -l 2>/dev/null; echo "$backup_interval $backup_script") | crontab -
+    (crontab -l 2>/dev/null | grep -v "$backup_script"; echo "$backup_interval $backup_script") | crontab -
 
     # Testar execução
     print_info "Testando backup..."
@@ -77,7 +133,6 @@ EOF
     print_info "Schedule: $backup_interval"
     print_info "Repositório: https://github.com/$github_repo"
 }
-
 # Listar backups
 list_github_backups() {
     local github_token=$1
