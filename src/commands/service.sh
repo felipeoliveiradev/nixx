@@ -28,12 +28,14 @@ check_and_create_network() {
 fix_gitlab_deployment() {
     local timeout=${1:-300}
     
-    print_info "Preparando ambiente para GitLab..."
+    # Obter IP dinâmico
+    local SERVER_IP=$(hostname -I | awk '{print $1}')
+    print_info "IP do servidor: $SERVER_IP"
 
     # 1. Verificar se está em modo swarm
     if ! docker info | grep -q "Swarm: active"; then
         print_info "Inicializando Docker Swarm..."
-        docker swarm init --advertise-addr $(hostname -I | awk '{print $1}') || true
+        docker swarm init --advertise-addr $SERVER_IP || true
     fi
 
     # 2. Criar rede
@@ -70,25 +72,26 @@ fix_gitlab_deployment() {
     done
 
     # 7. Configurar e criar GitLab
-    print_info "Criando GitLab com Puma..."
+    print_info "Criando GitLab..."
     
+    # Configuração do GitLab
     local gitlab_config="
-        external_url 'http://192.168.200.211;
-        gitlab_rails['gitlab_shell_ssh_port'] = 22;
-        puma['worker_processes'] = 4;
-        puma['max_threads'] = 4;
-        puma['min_threads'] = 1;
-        postgresql['shared_buffers'] = '256MB';
-        postgresql['max_worker_processes'] = 8;
-        redis['tcp_timeout'] = '60';
-        redis['io_threads'] = '4';
-        prometheus_monitoring['enable'] = true;
-        grafana['enabled'] = true;
+external_url 'http://${SERVER_IP}';
+gitlab_rails['gitlab_shell_ssh_port'] = 22;
+puma['worker_processes'] = 4;
+puma['max_threads'] = 4;
+puma['min_threads'] = 1;
+postgresql['shared_buffers'] = '256MB';
+postgresql['max_worker_processes'] = 8;
+redis['tcp_timeout'] = '60';
+redis['io_threads'] = '4';
+prometheus_monitoring['enable'] = true;
+grafana['enabled'] = true;
     "
 
     docker service create \
         --name gitlab \
-        --hostname 192.168.200.211 \
+        --hostname gitlab.local \
         --publish 80:80 \
         --publish 443:443 \
         --publish 22:22 \
@@ -97,8 +100,6 @@ fix_gitlab_deployment() {
         --mount type=volume,source=gitlab_data,target=/var/opt/gitlab \
         --network monitoring \
         --env GITLAB_ROOT_PASSWORD=password123 \
-        --env GITLAB_HOST=http://localhost \
-        --env GITLAB_PORT=8090 \
         --env "GITLAB_OMNIBUS_CONFIG=$gitlab_config" \
         --limit-cpu 2 \
         --limit-memory 4GB \
@@ -118,7 +119,7 @@ fix_gitlab_deployment() {
             local replicas=$(docker service ls --format "{{.Replicas}}" --filter "name=gitlab")
             if [[ $replicas == "1/1" ]]; then
                 print_success "GitLab iniciado com sucesso!"
-                print_info "URL: http://192.168.200.211"
+                print_info "URL: http://${SERVER_IP}"
                 print_info "Usuario: root"
                 print_info "Senha: password123"
                 return 0
