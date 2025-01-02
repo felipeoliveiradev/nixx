@@ -1,6 +1,86 @@
 # src/commands/service.sh
 #!/bin/bash
 
+fix_gitlab_deployment() {
+    local timeout=${1:-300}  # 5 minutos de timeout padrão
+    
+    print_info "Preparando ambiente para GitLab..."
+
+    # 1. Limpar recursos antigos
+    print_info "Limpando recursos antigos..."
+    docker service rm gitlab || true
+    docker volume rm gitlab_config gitlab_logs gitlab_data || true
+    sleep 5
+
+    # 2. Verificar e corrigir Redis
+    print_info "Verificando Redis..."
+    docker run --rm --network monitoring redis:latest redis-cli -h redis ping || {
+        print_warning "Problema com Redis detectado, recriando..."
+        docker service rm redis || true
+        docker service create \
+            --name redis \
+            --network monitoring \
+            --mount type=volume,source=redis_data,target=/data \
+            redis:latest --appendonly yes
+    }
+
+    # 3. Verificar e aumentar limites do sistema
+    print_info "Configurando limites do sistema..."
+    sysctl -w vm.max_map_count=262144 || true
+    sysctl -w fs.file-max=524288 || true
+
+    # 4. Criar volumes com verificação
+    print_info "Criando volumes..."
+    for volume in gitlab_config gitlab_logs gitlab_data; do
+        docker volume create $volume
+        if [ $? -ne 0 ]; then
+            print_error "Falha ao criar volume $volume"
+            return 1
+        fi
+    done
+
+    # 5. Criar serviço GitLab com configurações otimizadas
+    print_info "Criando serviço GitLab..."
+    docker service create \
+        --name gitlab \
+        --publish 80:80 \
+        --publish 443:443 \
+        --publish 22:22 \
+        --mount source=gitlab_config,target=/etc/gitlab \
+        --mount source=gitlab_logs,target=/var/log/gitlab \
+        --mount source=gitlab_data,target=/var/opt/gitlab \
+        --network monitoring \
+        --env GITLAB_ROOT_PASSWORD=password123 \
+        --env GITLAB_HOST=http://192.168.200.211 \
+        --env GITLAB_PORT=80 \
+        --env GITLAB_SHARED_RUNNERS_REGISTRATION_TOKEN=token \
+        --env 'GITLAB_OMNIBUS_CONFIG=postgresql["shared_buffers"] = "256MB"; postgresql["max_worker_processes"] = 8; redis["tcp_timeout"] = "60"; redis["io_threads"] = "4"; unicorn["worker_timeout"] = 60; unicorn["worker_processes"] = 4;' \
+        --limit-cpu 2 \
+        --limit-memory 4GB \
+        --update-parallelism 1 \
+        --update-delay 10s \
+        --update-failure-action rollback \
+        --restart-condition any \
+        --restart-delay 5s \
+        --restart-max-attempts 3 \
+        $image
+
+    # 6. Aguardar e verificar status
+    print_info "Aguardando GitLab iniciar (pode levar alguns minutos)..."
+    local count=0
+    while [ $count -lt $timeout ]; do
+        if curl -s http://localhost:8090/-/health > /dev/null; then
+            print_success "GitLab iniciado com sucesso!"
+            return 0
+        fi
+        sleep 10
+        count=$((count + 10))
+        print_info "Ainda aguardando... (${count}s/${timeout}s)"
+    done
+
+    print_error "Timeout ao aguardar GitLab iniciar"
+    return 1
+}
 # Criar serviço
 create_service() {
     local name=$1
@@ -13,21 +93,7 @@ create_service() {
             else
                 image="gitlab/gitlab-ce:latest"
             fi
-            
-            print_info "Criando GitLab..."
-            docker service create \
-                --name gitlab \
-                --publish 8090:80 \
-                --publish 443:443 \
-                --publish 22:22 \
-                --mount source=gitlab_config,target=/etc/gitlab \
-                --mount source=gitlab_logs,target=/var/log/gitlab \
-                --mount source=gitlab_data,target=/var/opt/gitlab \
-                --network monitoring \
-                --env GITLAB_ROOT_PASSWORD=password123 \
-                --env GITLAB_HOST=http://localhost \
-                --env GITLAB_PORT=8090 \
-                $image
+            fix_gitlab_deployment
             ;;
             
         "portainer")
