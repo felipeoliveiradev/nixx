@@ -492,8 +492,6 @@ sync_repositories() {
     if [ -z "$source_repo" ] || [ -z "$dest_repo" ] || [ -z "$gitlab_token" ] || [ -z "$github_token" ]; then
         print_error "Todos os parâmetros são necessários"
         print_info "Uso: nixx backup sync SOURCE DEST SOURCE_REPO DEST_REPO GITLAB_TOKEN GITHUB_TOKEN"
-        print_info "Exemplo gitlab->github: nixx backup sync gitlab github grupo/projeto usuario/repo gitlab_token github_token"
-        print_info "Exemplo github->gitlab: nixx backup sync github gitlab usuario/repo grupo/projeto gitlab_token github_token"
         return 1
     fi
 
@@ -509,18 +507,35 @@ sync_repositories() {
     case $source in
         "gitlab")
             print_info "Clonando repositório do GitLab..."
-            if ! git clone --mirror "http://oauth2:${gitlab_token}@${SERVER_IP}/${source_repo}.git" repo; then
-                print_error "Falha ao clonar do GitLab"
+            git clone --mirror "http://oauth2:${gitlab_token}@${SERVER_IP}/${source_repo}.git" repo
+            CLONE_EXIT_CODE=$?
+            if [ $CLONE_EXIT_CODE -ne 0 ]; then
+                print_error "Falha ao clonar do GitLab (Código de saída: $CLONE_EXIT_CODE)"
+                print_info "Detalhes:"
+                print_info "URL: http://oauth2:***@${SERVER_IP}/${source_repo}.git"
+                print_info "Verifique:"
+                print_info "1. A URL do repositório está correta"
+                print_info "2. O token do GitLab tem permissões de leitura"
+                print_info "3. O repositório existe"
                 cd /
                 rm -rf "$TEMP_DIR"
                 return 1
             fi
             
             cd repo || exit 1
-            print_info "Enviando para GitHub..."
             git remote add github "https://${github_token}@github.com/${dest_repo}.git"
-            if ! git push github --mirror; then
-                print_error "Falha ao enviar para GitHub"
+            
+            print_info "Enviando para GitHub..."
+            git push github --mirror
+            PUSH_EXIT_CODE=$?
+            if [ $PUSH_EXIT_CODE -ne 0 ]; then
+                print_error "Falha ao enviar para GitHub (Código de saída: $PUSH_EXIT_CODE)"
+                print_info "Detalhes:"
+                print_info "URL do destino: https://***/github.com/${dest_repo}.git"
+                print_info "Verifique:"
+                print_info "1. O token do GitHub é válido"
+                print_info "2. Você tem permissão para enviar para o repositório"
+                print_info "3. O repositório de destino existe"
                 cd /
                 rm -rf "$TEMP_DIR"
                 return 1
@@ -529,18 +544,35 @@ sync_repositories() {
             
         "github")
             print_info "Clonando repositório do GitHub..."
-            if ! git clone --mirror "https://${github_token}@github.com/${source_repo}.git" repo; then
-                print_error "Falha ao clonar do GitHub"
+            git clone --mirror "https://${github_token}@github.com/${source_repo}.git" repo
+            CLONE_EXIT_CODE=$?
+            if [ $CLONE_EXIT_CODE -ne 0 ]; then
+                print_error "Falha ao clonar do GitHub (Código de saída: $CLONE_EXIT_CODE)"
+                print_info "Detalhes:"
+                print_info "URL: https://***/github.com/${source_repo}.git"
+                print_info "Verifique:"
+                print_info "1. A URL do repositório está correta"
+                print_info "2. O token do GitHub é válido"
+                print_info "3. O repositório existe"
                 cd /
                 rm -rf "$TEMP_DIR"
                 return 1
             fi
             
             cd repo || exit 1
-            print_info "Enviando para GitLab..."
             git remote add gitlab "http://oauth2:${gitlab_token}@${SERVER_IP}/${dest_repo}.git"
-            if ! git push gitlab --mirror; then
-                print_error "Falha ao enviar para GitLab"
+            
+            print_info "Enviando para GitLab..."
+            git push gitlab --mirror
+            PUSH_EXIT_CODE=$?
+            if [ $PUSH_EXIT_CODE -ne 0 ]; then
+                print_error "Falha ao enviar para GitLab (Código de saída: $PUSH_EXIT_CODE)"
+                print_info "Detalhes:"
+                print_info "URL do destino: http://oauth2:***@${SERVER_IP}/${dest_repo}.git"
+                print_info "Verifique:"
+                print_info "1. O token do GitLab é válido"
+                print_info "2. Você tem permissão para enviar para o repositório"
+                print_info "3. O repositório de destino existe"
                 cd /
                 rm -rf "$TEMP_DIR"
                 return 1
