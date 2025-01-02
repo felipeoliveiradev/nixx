@@ -25,8 +25,18 @@ check_and_create_network() {
 
     print_success "Rede monitoring criada com sucesso"
 }
+generate_secure_password() {
+    # Gera uma senha de 20 caracteres com letras maiúsculas, minúsculas, números e símbolos
+    local password=$(tr -dc 'A-Za-z0-9!@#$%^&*()_+' < /dev/urandom | head -c 20)
+    echo "$password"
+}
+
 fix_gitlab_deployment() {
     local timeout=${1:-300}
+    
+    # Gerar senha segura
+    local SECURE_PASSWORD=$(generate_secure_password)
+    print_info "Gerando senha segura para root..."
     
     # Obter IP dinâmico
     local SERVER_IP=$(hostname -I | awk '{print $1}')
@@ -61,8 +71,10 @@ fix_gitlab_deployment() {
     
     # Configuração do GitLab (formato Ruby)
     local gitlab_config="
-external_url 'http://${SERVER_IP}';
+external_url 'http://${SERVER_IP}'
 gitlab_rails['gitlab_shell_ssh_port'] = 22
+gitlab_rails['initial_root_password'] = '${SECURE_PASSWORD}'
+gitlab_rails['store_initial_root_password'] = false
 puma['worker_processes'] = 2
 puma['max_threads'] = 4
 puma['min_threads'] = 1
@@ -82,7 +94,6 @@ prometheus_monitoring['enable'] = true
         --mount type=volume,source=gitlab_logs,target=/var/log/gitlab \
         --mount type=volume,source=gitlab_data,target=/var/opt/gitlab \
         --network monitoring \
-        --env GITLAB_ROOT_PASSWORD=password123 \
         --env GITLAB_OMNIBUS_CONFIG="$gitlab_config" \
         --limit-cpu 2 \
         --limit-memory 4GB \
@@ -102,9 +113,13 @@ prometheus_monitoring['enable'] = true
             local replicas=$(docker service ls --format "{{.Replicas}}" --filter "name=gitlab")
             if [[ $replicas == "1/1" ]]; then
                 print_success "GitLab iniciado com sucesso!"
-                print_info "URL: http://${SERVER_IP}"
-                print_info "Usuario: root"
-                print_info "Senha: password123"
+                print_info "=================================================="
+                print_info "GitLab está disponível em: http://${SERVER_IP}"
+                print_info "Usuário: root"
+                print_info "Senha: ${SECURE_PASSWORD}"
+                print_info "=================================================="
+                print_info "IMPORTANTE: Salve estas credenciais em um local seguro!"
+                print_info "Por segurança, altere a senha após o primeiro login."
                 print_info "Aguarde alguns minutos para o GitLab finalizar a configuração interna"
                 return 0
             fi
