@@ -350,6 +350,87 @@ execute_backup_now() {
     print_success "Backup dos repositórios concluído com sucesso!"
 }
 
+sync_repositories() {
+    local source=$1      # gitlab ou github
+    local dest=$2        # github ou gitlab
+    local source_repo=$3 # caminho/do/repo
+    local dest_repo=$4   # usuario/repo
+    local gitlab_token=$5
+    local github_token=$6
+
+    if [ -z "$source_repo" ] || [ -z "$dest_repo" ] || [ -z "$gitlab_token" ] || [ -z "$github_token" ]; then
+        print_error "Todos os parâmetros são necessários"
+        print_info "Uso: nixx backup sync SOURCE DEST SOURCE_REPO DEST_REPO GITLAB_TOKEN GITHUB_TOKEN"
+        print_info "Exemplo gitlab->github: nixx backup sync gitlab github grupo/projeto usuario/repo gitlab_token github_token"
+        print_info "Exemplo github->gitlab: nixx backup sync github gitlab usuario/repo grupo/projeto gitlab_token github_token"
+        return 1
+    fi
+
+    print_info "Iniciando sincronização de $source para $dest..."
+    local TEMP_DIR="/tmp/repo-sync-$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$TEMP_DIR"
+    cd "$TEMP_DIR" || exit 1
+
+    # Definir URLs e tokens baseado na direção
+    local SERVER_IP=$(get_server_ip)
+    local GITLAB_URL="http://$SERVER_IP"
+    
+    case $source in
+        "gitlab")
+            print_info "Clonando repositório do GitLab..."
+            if ! git clone --mirror "http://oauth2:${gitlab_token}@${SERVER_IP}/${source_repo}.git" repo; then
+                print_error "Falha ao clonar do GitLab"
+                cd /
+                rm -rf "$TEMP_DIR"
+                return 1
+            fi
+            
+            cd repo || exit 1
+            print_info "Enviando para GitHub..."
+            git remote add github "https://${github_token}@github.com/${dest_repo}.git"
+            if ! git push github --mirror; then
+                print_error "Falha ao enviar para GitHub"
+                cd /
+                rm -rf "$TEMP_DIR"
+                return 1
+            fi
+            ;;
+            
+        "github")
+            print_info "Clonando repositório do GitHub..."
+            if ! git clone --mirror "https://${github_token}@github.com/${source_repo}.git" repo; then
+                print_error "Falha ao clonar do GitHub"
+                cd /
+                rm -rf "$TEMP_DIR"
+                return 1
+            fi
+            
+            cd repo || exit 1
+            print_info "Enviando para GitLab..."
+            git remote add gitlab "http://oauth2:${gitlab_token}@${SERVER_IP}/${dest_repo}.git"
+            if ! git push gitlab --mirror; then
+                print_error "Falha ao enviar para GitLab"
+                cd /
+                rm -rf "$TEMP_DIR"
+                return 1
+            fi
+            ;;
+            
+        *)
+            print_error "Origem inválida. Use 'gitlab' ou 'github'"
+            cd /
+            rm -rf "$TEMP_DIR"
+            return 1
+            ;;
+    esac
+
+    # Limpar
+    cd /
+    rm -rf "$TEMP_DIR"
+    print_success "Sincronização concluída com sucesso!"
+}
+
+
 # Criar backup
 create_backup() {
     local service=$1
@@ -464,6 +545,7 @@ clean_backups() {
     print_success "Limpeza concluída"
 }
 
+
 # Handler principal de backup
 handle_backup() {
     local action=$1
@@ -488,6 +570,9 @@ handle_backup() {
             ;;
         "list")
             list_backups "$1"
+            ;;
+        "sync")
+            sync_repositories "$@"
             ;;
         "clean")
             clean_backups "${1:-7}"  # Default 7 days retention
