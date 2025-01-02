@@ -25,9 +25,8 @@ check_and_create_network() {
 
     print_success "Rede monitoring criada com sucesso"
 }
-
 fix_gitlab_deployment() {
-    local timeout=${1:-300}  # 5 minutos de timeout padrão
+    local timeout=${1:-300}
     
     print_info "Preparando ambiente para GitLab..."
 
@@ -38,48 +37,59 @@ fix_gitlab_deployment() {
     fi
 
     # 2. Criar rede
-    check_and_create_network
+    print_info "Configurando rede..."
+    docker network rm monitoring || true
+    sleep 2
+    docker network create --driver overlay --attachable monitoring
 
     # 3. Limpar recursos antigos
     print_info "Limpando recursos antigos..."
-    docker service rm gitlab || true
+    docker service rm gitlab redis || true
     docker volume rm gitlab_config gitlab_logs gitlab_data || true
     sleep 5
 
     # 4. Configurar Redis
     print_info "Configurando Redis..."
-    docker service rm redis || true
-    sleep 2
-    
     docker service create \
         --name redis \
         --network monitoring \
         --mount type=volume,source=redis_data,target=/data \
         redis:latest redis-server --appendonly yes
-    
-    sleep 5  # Aguardar Redis iniciar
 
-    # 5. Verificar e aumentar limites do sistema
+    sleep 5
+
+    # 5. Configurar limites do sistema
     print_info "Configurando limites do sistema..."
     sysctl -w vm.max_map_count=262144 || true
     sysctl -w fs.file-max=524288 || true
 
-    # 6. Criar volumes com verificação
+    # 6. Criar volumes
     print_info "Criando volumes..."
     for volume in gitlab_config gitlab_logs gitlab_data; do
         docker volume create $volume
-        if [ $? -ne 0 ]; then
-            print_error "Falha ao criar volume $volume"
-            return 1
-        fi
     done
 
-    # 7. Criar serviço GitLab com configurações otimizadas
-    print_info "Criando serviço GitLab..."
+    # 7. Configurar e criar GitLab
+    print_info "Criando GitLab com Puma..."
+    
+    local gitlab_config="
+        external_url 'http://192.168.200.211;
+        gitlab_rails['gitlab_shell_ssh_port'] = 22;
+        puma['worker_processes'] = 4;
+        puma['max_threads'] = 4;
+        puma['min_threads'] = 1;
+        postgresql['shared_buffers'] = '256MB';
+        postgresql['max_worker_processes'] = 8;
+        redis['tcp_timeout'] = '60';
+        redis['io_threads'] = '4';
+        prometheus_monitoring['enable'] = true;
+        grafana['enabled'] = true;
+    "
+
     docker service create \
         --name gitlab \
-        --hostname gitlab.local \
-        --publish 8090:80 \
+        --hostname 192.168.200.211 \
+        --publish 80:80 \
         --publish 443:443 \
         --publish 22:22 \
         --mount type=volume,source=gitlab_config,target=/etc/gitlab \
@@ -89,8 +99,7 @@ fix_gitlab_deployment() {
         --env GITLAB_ROOT_PASSWORD=password123 \
         --env GITLAB_HOST=http://localhost \
         --env GITLAB_PORT=8090 \
-        --env GITLAB_SHARED_RUNNERS_REGISTRATION_TOKEN=token \
-        --env 'GITLAB_OMNIBUS_CONFIG=external_url "http://localhost:8090"; postgresql["shared_buffers"] = "256MB"; postgresql["max_worker_processes"] = 8; redis["tcp_timeout"] = "60"; redis["io_threads"] = "4"; unicorn["worker_timeout"] = 60; unicorn["worker_processes"] = 4;' \
+        --env "GITLAB_OMNIBUS_CONFIG=$gitlab_config" \
         --limit-cpu 2 \
         --limit-memory 4GB \
         --update-parallelism 1 \
@@ -101,7 +110,7 @@ fix_gitlab_deployment() {
         --restart-max-attempts 3 \
         $image
 
-    # 8. Aguardar e verificar status
+    # 8. Aguardar inicialização
     print_info "Aguardando GitLab iniciar (pode levar alguns minutos)..."
     local count=0
     while [ $count -lt $timeout ]; do
@@ -109,6 +118,9 @@ fix_gitlab_deployment() {
             local replicas=$(docker service ls --format "{{.Replicas}}" --filter "name=gitlab")
             if [[ $replicas == "1/1" ]]; then
                 print_success "GitLab iniciado com sucesso!"
+                print_info "URL: http://192.168.200.211"
+                print_info "Usuario: root"
+                print_info "Senha: password123"
                 return 0
             fi
         fi
