@@ -161,27 +161,52 @@ list_github_backups() {
 execute_backup_now() {
     local github_token=$1
     local github_repo=$2
+    local gitlab_token=$3
 
     if [ -z "$github_token" ] || [ -z "$github_repo" ]; then
         print_error "Token do GitHub e repositório são necessários"
-        print_info "Uso: nixx backup github-now TOKEN REPO"
-        print_info "Exemplo: nixx backup github-now ghp_xxx123 usuario/repo"
+        print_info "Uso: nixx backup github-now GITHUB_TOKEN GITHUB_REPO [GITLAB_TOKEN]"
+        print_info "Exemplo: nixx backup github-now ghp_xxx123 usuario/repo glpat_xxxxx"
         return 1
     fi
 
     print_info "Iniciando backup imediato dos repositórios..."
 
     # Verificar token do GitHub
-    print_info "Verificando credenciais..."
+    print_info "Verificando credenciais do GitHub..."
     if ! curl -s -H "Authorization: token $github_token" \
         "https://api.github.com/user" | jq -e '.login' > /dev/null; then
         print_error "Token do GitHub inválido"
         return 1
     fi
 
+    # Se o token do GitLab não foi fornecido, tentar obtê-lo
+    if [ -z "$gitlab_token" ]; then
+        print_info "Token do GitLab não fornecido, tentando obter automaticamente..."
+        gitlab_token=$(docker exec $(docker ps -q -f name=gitlab) gitlab-rails runner "puts User.where(admin: true).first&.personal_access_tokens&.first&.token" 2>/dev/null)
+    fi
+
+    if [ -z "$gitlab_token" ]; then
+        print_error "Token do GitLab não encontrado."
+        print_info "Por favor, forneça o token do GitLab como terceiro parâmetro:"
+        print_info "nixx backup github-now GITHUB_TOKEN GITHUB_REPO GITLAB_TOKEN"
+        print_info "Você pode gerar um token no GitLab em: User Settings > Access Tokens"
+        return 1
+    fi
+
     local TEMP_DIR="/tmp/gitlab-repos-backup-$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$TEMP_DIR"
     cd "$TEMP_DIR" || exit 1
+
+    # Verificar token do GitLab
+    print_info "Verificando credenciais do GitLab..."
+    if ! curl -s --header "PRIVATE-TOKEN: $gitlab_token" \
+        "http://localhost/api/v4/projects" | jq -e 'length > 0' > /dev/null; then
+        print_error "Token do GitLab inválido ou sem acesso aos projetos"
+        cd /
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
 
     # Inicializar repositório Git para o backup
     git init
@@ -192,21 +217,9 @@ execute_backup_now() {
     # Criar diretório para os repos
     mkdir -p repos
 
-    # Obter token do GitLab do container
-    print_info "Obtendo token do GitLab..."
-    GITLAB_TOKEN=$(docker exec $(docker ps -q -f name=gitlab) gitlab-rails runner "puts User.where(admin: true).first.personal_access_tokens.first.token" 2>/dev/null)
-
-    if [ -z "$GITLAB_TOKEN" ]; then
-        print_error "Não foi possível obter o token do GitLab"
-        cd /
-        rm -rf "$TEMP_DIR"
-        return 1
-    fi
-
     # Função para clonar um repositório e suas branches
     clone_repository() {
-        local project_id=$1
-        local project_path=$2
+        local project_path=$1
         
         print_info "Clonando repositório: $project_path"
         
@@ -215,7 +228,7 @@ execute_backup_now() {
         cd "repos/$project_path" || return 1
         
         # Clonar o repositório
-        if ! git clone --mirror "http://oauth2:${GITLAB_TOKEN}@localhost/${project_path}.git" .; then
+        if ! git clone --mirror "http://oauth2:${gitlab_token}@localhost/${project_path}.git" .; then
             print_error "Falha ao clonar $project_path"
             return 1
         fi
@@ -228,13 +241,11 @@ execute_backup_now() {
 
     # Listar e clonar todos os repositórios
     print_info "Obtendo lista de projetos..."
-    docker exec $(docker ps -q -f name=gitlab) gitlab-rails runner '
-        Project.all.each do |project|
-            puts "#{project.id}|#{project.path_with_namespace}"
-        end
-    ' | while IFS='|' read -r project_id project_path; do
-        clone_repository "$project_id" "$project_path"
-    done
+    curl -s --header "PRIVATE-TOKEN: $gitlab_token" \
+        "http://localhost/api/v4/projects" | \
+        jq -r '.[] | .path_with_namespace' | while read -r project_path; do
+            clone_repository "$project_path"
+        done
 
     # Verificar se há repositórios para backup
     if [ -z "$(ls -A repos)" ]; then
@@ -252,7 +263,7 @@ execute_backup_now() {
 
     # Enviar para GitHub
     print_info "Enviando para GitHub..."
-    git remote add origin "https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git"
+    git remote add origin "https://${github_token}@github.com/${github_repo}.git"
     if ! git push -u origin main --force; then
         print_error "Falha ao enviar para o GitHub"
         cd /
@@ -266,6 +277,7 @@ execute_backup_now() {
 
     print_success "Backup dos repositórios concluído com sucesso!"
 }
+
 
 # Criar backup
 create_backup() {
