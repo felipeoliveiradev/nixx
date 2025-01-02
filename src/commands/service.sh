@@ -50,44 +50,27 @@ fix_gitlab_deployment() {
     docker volume rm gitlab_config gitlab_logs gitlab_data || true
     sleep 5
 
-    # 4. Configurar Redis
-    print_info "Configurando Redis..."
-    docker service create \
-        --name redis \
-        --network monitoring \
-        --mount type=volume,source=redis_data,target=/data \
-        redis:latest redis-server --appendonly yes
-
-    sleep 5
-
-    # 5. Configurar limites do sistema
-    print_info "Configurando limites do sistema..."
-    sysctl -w vm.max_map_count=262144 || true
-    sysctl -w fs.file-max=524288 || true
-
-    # 6. Criar volumes
+    # 4. Criar volumes
     print_info "Criando volumes..."
     for volume in gitlab_config gitlab_logs gitlab_data; do
         docker volume create $volume
     done
 
-    # 7. Configurar e criar GitLab
+    # 5. Configurar e criar GitLab
     print_info "Criando GitLab..."
     
-    # Configuração do GitLab
+    # Configuração do GitLab (formato Ruby)
     local gitlab_config="
 external_url 'http://${SERVER_IP}';
-gitlab_rails['gitlab_shell_ssh_port'] = 22;
-puma['worker_processes'] = 4;
-puma['max_threads'] = 4;
-puma['min_threads'] = 1;
-postgresql['shared_buffers'] = '256MB';
-postgresql['max_worker_processes'] = 8;
-redis['tcp_timeout'] = '60';
-redis['io_threads'] = '4';
-prometheus_monitoring['enable'] = true;
-grafana['enabled'] = true;
-    "
+gitlab_rails['gitlab_shell_ssh_port'] = 22
+puma['worker_processes'] = 2
+puma['max_threads'] = 4
+puma['min_threads'] = 1
+postgresql['shared_buffers'] = '256MB'
+postgresql['max_worker_processes'] = 4
+redis['io_threads'] = 2
+prometheus_monitoring['enable'] = true
+"
 
     docker service create \
         --name gitlab \
@@ -100,7 +83,7 @@ grafana['enabled'] = true;
         --mount type=volume,source=gitlab_data,target=/var/opt/gitlab \
         --network monitoring \
         --env GITLAB_ROOT_PASSWORD=password123 \
-        --env "GITLAB_OMNIBUS_CONFIG=$gitlab_config" \
+        --env GITLAB_OMNIBUS_CONFIG="$gitlab_config" \
         --limit-cpu 2 \
         --limit-memory 4GB \
         --update-parallelism 1 \
@@ -111,7 +94,7 @@ grafana['enabled'] = true;
         --restart-max-attempts 3 \
         $image
 
-    # 8. Aguardar inicialização
+    # 6. Aguardar inicialização
     print_info "Aguardando GitLab iniciar (pode levar alguns minutos)..."
     local count=0
     while [ $count -lt $timeout ]; do
@@ -122,17 +105,19 @@ grafana['enabled'] = true;
                 print_info "URL: http://${SERVER_IP}"
                 print_info "Usuario: root"
                 print_info "Senha: password123"
+                print_info "Aguarde alguns minutos para o GitLab finalizar a configuração interna"
                 return 0
             fi
         fi
         sleep 10
         count=$((count + 10))
         print_info "Ainda aguardando... (${count}s/${timeout}s)"
-        docker service ls
+        docker service logs gitlab --tail 20
     done
 
     print_error "Timeout ao aguardar GitLab iniciar"
-    docker service logs gitlab
+    print_error "Logs do serviço:"
+    docker service logs gitlab --tail 50
     return 1
 }
 # Criar serviço
