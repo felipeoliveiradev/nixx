@@ -693,7 +693,7 @@ setup_sync_trigger() {
     # Obter IP público para webhook
     print_info "Detectando IP do servidor..."
     local server_ip=$(get_server_ip)
-    local webhook_url="http://$server_ip:9000/webhook"
+    local webhook_url="http://$server_ip:9003/webhook"
 
     # Configurar serviço de webhook
     print_info "Configurando serviço de webhook..."
