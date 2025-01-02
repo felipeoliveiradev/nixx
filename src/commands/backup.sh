@@ -684,16 +684,53 @@ setup_sync_trigger() {
     local gitlab_token=$5
     local github_token=$6
 
+    # Validação de parâmetros
     if [ -z "$source_repo" ] || [ -z "$dest_repo" ] || [ -z "$gitlab_token" ] || [ -z "$github_token" ]; then
         print_error "Todos os parâmetros são necessários"
         print_info "Uso: nixx backup sync --trigger SOURCE DEST SOURCE_REPO DEST_REPO GITLAB_TOKEN GITHUB_TOKEN"
+        print_info "Exemplo: nixx backup sync --trigger github gitlab usuario/repo grupo/projeto gitlab_token github_token"
         return 1
     fi
 
     # Obter IP público para webhook
     print_info "Detectando IP do servidor..."
     local server_ip=$(get_server_ip)
+    
+    if [ -z "$server_ip" ]; then
+        print_error "Não foi possível detectar o IP do servidor"
+        return 1
+    fi
+
     local webhook_url="http://$server_ip:9003/webhook"
+
+    # Verificação de tokens antes de configurar webhook
+    print_info "Verificando credenciais..."
+
+    # Verificar token do GitLab
+    local gitlab_test
+    gitlab_test=$(curl -s --header "PRIVATE-TOKEN: $gitlab_token" "http://$server_ip/api/v4/projects")
+    
+    if ! echo "$gitlab_test" | jq -e '.' >/dev/null 2>&1; then
+        print_error "Token do GitLab inválido ou sem permissões"
+        print_info "Verifique: 
+1. O token está correto
+2. O token tem permissões de API
+3. O GitLab está acessível"
+        return 1
+    fi
+
+    # Verificar token do GitHub
+    local github_test
+    github_test=$(curl -s -H "Authorization: token $github_token" "https://api.github.com/user")
+    
+    if ! echo "$github_test" | jq -e '.login' >/dev/null 2>&1; then
+        print_error "Token do GitHub inválido ou sem permissões"
+        print_info "Verifique:
+1. O token está correto
+2. O token tem permissões de repositório
+3. Sua conexão com GitHub"
+        return 1
+    fi
 
     # Configurar serviço de webhook
     print_info "Configurando serviço de webhook..."
@@ -702,10 +739,42 @@ setup_sync_trigger() {
     # Configurar webhook baseado na origem
     case $source in
         "gitlab")
-            setup_gitlab_webhook "$gitlab_token" "$source_repo" "$webhook_url"
+            print_info "Configurando webhook do GitLab para $source_repo..."
+            local gitlab_webhook_result
+            gitlab_webhook_result=$(curl -s --request POST \
+                --header "PRIVATE-TOKEN: $gitlab_token" \
+                "http://$server_ip/api/v4/projects/${source_repo//\//%2F}/hooks" \
+                --form "url=$webhook_url" \
+                --form "push_events=true" \
+                --form "tag_push_events=true")
+
+            if ! echo "$gitlab_webhook_result" | jq -e '.url' >/dev/null 2>&1; then
+                print_error "Falha ao configurar webhook do GitLab"
+                print_error "Resposta: $gitlab_webhook_result"
+                return 1
+            fi
             ;;
+
         "github")
-            setup_github_webhook "$github_token" "$source_repo" "$webhook_url"
+            print_info "Configurando webhook do GitHub para $source_repo..."
+            local github_webhook_result
+            github_webhook_result=$(curl -s -H "Authorization: token $github_token" \
+                "https://api.github.com/repos/$source_repo/hooks" \
+                -d "{
+                    \"name\": \"web\",
+                    \"active\": true,
+                    \"events\": [\"push\", \"create\"],
+                    \"config\": {
+                        \"url\": \"$webhook_url\",
+                        \"content_type\": \"json\"
+                    }
+                }")
+
+            if ! echo "$github_webhook_result" | jq -e '.url' >/dev/null 2>&1; then
+                print_error "Falha ao configurar webhook do GitHub"
+                print_error "Resposta: $github_webhook_result"
+                return 1
+            fi
             ;;
         *)
             print_error "Origem inválida. Use 'gitlab' ou 'github'"
