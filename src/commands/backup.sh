@@ -1,6 +1,27 @@
 # src/commands/backup.sh
 #!/bin/bash
-
+# Função para obter o IP do servidor
+get_server_ip() {
+    # Tenta diferentes métodos para obter o IP
+    local ip=""
+    
+    # Método 1: hostname -I (primeiro IP)
+    if command -v hostname >/dev/null 2>&1; then
+        ip=$(hostname -I | awk '{print $1}')
+    fi
+    
+    # Método 2: ip addr (se hostname falhar)
+    if [ -z "$ip" ] && command -v ip >/dev/null 2>&1; then
+        ip=$(ip addr show | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | cut -d/ -f1 | head -n1)
+    fi
+    
+    # Método 3: ifconfig (fallback)
+    if [ -z "$ip" ] && command -v ifconfig >/dev/null 2>&1; then
+        ip=$(ifconfig | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | head -n1)
+    fi
+    
+    echo "$ip"
+}
 
 setup_github_backup() {
     local github_token=$1
@@ -158,6 +179,32 @@ list_github_backups() {
         return 1
     fi
 }
+#!/bin/bash
+
+# Função para obter o IP do servidor
+get_server_ip() {
+    # Tenta diferentes métodos para obter o IP
+    local ip=""
+    
+    # Método 1: hostname -I (primeiro IP)
+    if command -v hostname >/dev/null 2>&1; then
+        ip=$(hostname -I | awk '{print $1}')
+    fi
+    
+    # Método 2: ip addr (se hostname falhar)
+    if [ -z "$ip" ] && command -v ip >/dev/null 2>&1; then
+        ip=$(ip addr show | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | cut -d/ -f1 | head -n1)
+    fi
+    
+    # Método 3: ifconfig (fallback)
+    if [ -z "$ip" ] && command -v ifconfig >/dev/null 2>&1; then
+        ip=$(ifconfig | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | head -n1)
+    fi
+    
+    echo "$ip"
+}
+
+# Função para executar backup imediatamente
 execute_backup_now() {
     local github_token=$1
     local github_repo=$2
@@ -182,12 +229,7 @@ execute_backup_now() {
 
     # Se o token do GitLab não foi fornecido, tentar obtê-lo
     if [ -z "$gitlab_token" ]; then
-        print_info "Token do GitLab não fornecido, tentando obter automaticamente..."
-        gitlab_token=$(docker exec $(docker ps -q -f name=gitlab) gitlab-rails runner "puts User.where(admin: true).first&.personal_access_tokens&.first&.token" 2>/dev/null)
-    fi
-
-    if [ -z "$gitlab_token" ]; then
-        print_error "Token do GitLab não encontrado."
+        print_error "Token do GitLab não fornecido"
         print_info "Por favor, forneça o token do GitLab como terceiro parâmetro:"
         print_info "nixx backup github-now GITHUB_TOKEN GITHUB_REPO GITLAB_TOKEN"
         print_info "Você pode gerar um token no GitLab em: User Settings > Access Tokens"
@@ -198,11 +240,32 @@ execute_backup_now() {
     mkdir -p "$TEMP_DIR"
     cd "$TEMP_DIR" || exit 1
 
+    # Detectar IP do servidor
+    print_info "Detectando IP do servidor..."
+    local SERVER_IP=$(get_server_ip)
+    
+    if [ -z "$SERVER_IP" ]; then
+        print_error "Não foi possível detectar o IP do servidor"
+        cd /
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
+
+    print_info "IP do servidor detectado: $SERVER_IP"
+    local GITLAB_URL="http://$SERVER_IP"
+
     # Verificar token do GitLab
-    print_info "Verificando credenciais do GitLab..."
-    if ! curl -s --header "PRIVATE-TOKEN: $gitlab_token" \
-        "http://localhost/api/v4/projects" | jq -e 'length > 0' > /dev/null; then
-        print_error "Token do GitLab inválido ou sem acesso aos projetos"
+    print_info "Verificando credenciais do GitLab em $GITLAB_URL..."
+    local gitlab_test
+    gitlab_test=$(curl -s --header "PRIVATE-TOKEN: $gitlab_token" "$GITLAB_URL/api/v4/projects")
+    
+    if ! echo "$gitlab_test" | jq -e '.' >/dev/null 2>&1; then
+        print_error "Não foi possível conectar ao GitLab ou token inválido"
+        print_error "URL: $GITLAB_URL"
+        print_error "Verifique se:"
+        print_info "1. O GitLab está acessível em $GITLAB_URL"
+        print_info "2. O token está correto"
+        print_info "3. O token tem permissões de API e read_repository"
         cd /
         rm -rf "$TEMP_DIR"
         return 1
@@ -227,8 +290,8 @@ execute_backup_now() {
         mkdir -p "repos/$project_path"
         cd "repos/$project_path" || return 1
         
-        # Clonar o repositório
-        if ! git clone --mirror "http://oauth2:${gitlab_token}@localhost/${project_path}.git" .; then
+        # Clonar o repositório usando oauth2
+        if ! git clone --mirror "http://oauth2:${gitlab_token}@${SERVER_IP}/${project_path}.git" .; then
             print_error "Falha ao clonar $project_path"
             return 1
         fi
@@ -240,12 +303,21 @@ execute_backup_now() {
     }
 
     # Listar e clonar todos os repositórios
-    print_info "Obtendo lista de projetos..."
-    curl -s --header "PRIVATE-TOKEN: $gitlab_token" \
-        "http://localhost/api/v4/projects" | \
-        jq -r '.[] | .path_with_namespace' | while read -r project_path; do
-            clone_repository "$project_path"
-        done
+    print_info "Obtendo lista de projetos do GitLab..."
+    local projects_json
+    projects_json=$(curl -s --header "PRIVATE-TOKEN: $gitlab_token" "$GITLAB_URL/api/v4/projects")
+    
+    if ! echo "$projects_json" | jq -e 'length > 0' > /dev/null; then
+        print_error "Nenhum projeto encontrado no GitLab"
+        print_info "Verifique se o token tem as permissões necessárias"
+        cd /
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
+
+    echo "$projects_json" | jq -r '.[] | .path_with_namespace' | while read -r project_path; do
+        clone_repository "$project_path"
+    done
 
     # Verificar se há repositórios para backup
     if [ -z "$(ls -A repos)" ]; then
@@ -277,7 +349,6 @@ execute_backup_now() {
 
     print_success "Backup dos repositórios concluído com sucesso!"
 }
-
 
 # Criar backup
 create_backup() {
