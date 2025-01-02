@@ -204,6 +204,33 @@ create_service() {
                 --env GF_SECURITY_ADMIN_PASSWORD=admin \
                 grafana/grafana:latest
             ;;
+        "cadvisor")
+            print_info "Criando Grafana..."
+            docker service create \
+                --name cadvisor \
+                --mode global \
+                --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock \
+                --mount type=bind,source=/sys,target=/sys \
+                --mount type=bind,source=/var/lib/docker/,target=/var/lib/docker/ \
+                --network monitoring \
+                --publish published=8080,target=8080,mode=host \
+                gcr.io/cadvisor/cadvisor:latest
+            ;;
+        "node-exporter")
+            print_info "Criando Grafana..."
+            docker service create \
+                --name node-exporter \
+                --mode global \
+                --network monitoring \
+                --mount type=bind,source=/proc,target=/host/proc,readonly \
+                --mount type=bind,source=/sys,target=/host/sys,readonly \
+                --mount type=bind,source=/,target=/rootfs,readonly \
+                --publish published=9100,target=9100,mode=host \
+                prom/node-exporter:latest \
+                --path.procfs=/host/proc \
+                --path.sysfs=/host/sys \
+                --collector.filesystem.ignored-mount-points="^/(sys|proc|dev|host|etc)($|/)"
+            ;;
         "datadog")
             print_info "Criando Datadog Agent..."
             
