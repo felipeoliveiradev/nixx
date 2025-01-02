@@ -140,13 +140,131 @@ list_github_backups() {
 
     if [ -z "$github_token" ] || [ -z "$github_repo" ]; then
         print_error "Token do GitHub e repositório são necessários"
+        print_info "Uso: nixx backup github-list TOKEN REPO"
+        print_info "Exemplo: nixx backup github-list ghp_xxx123 usuario/repo"
         return 1
     fi
 
     print_info "Listando backups no GitHub..."
-    curl -s -H "Authorization: token $github_token" \
-        "https://api.github.com/repos/$github_repo/commits" | \
-        jq -r '.[] | "[\(.commit.author.date)] \(.commit.message)"'
+    local response
+    response=$(curl -s -H "Authorization: token $github_token" \
+        "https://api.github.com/repos/$github_repo/commits")
+    
+    if echo "$response" | jq -e 'type == "array"' > /dev/null; then
+        echo "$response" | jq -r '.[] | "[\(.commit.committer.date)] \(.commit.message)"'
+    else
+        error_message=$(echo "$response" | jq -r '.message // "Erro desconhecido"')
+        print_error "Falha ao listar commits: $error_message"
+        return 1
+    fi
+}
+execute_backup_now() {
+    local github_token=$1
+    local github_repo=$2
+
+    if [ -z "$github_token" ] || [ -z "$github_repo" ]; then
+        print_error "Token do GitHub e repositório são necessários"
+        print_info "Uso: nixx backup github-now TOKEN REPO"
+        print_info "Exemplo: nixx backup github-now ghp_xxx123 usuario/repo"
+        return 1
+    fi
+
+    print_info "Iniciando backup imediato dos repositórios..."
+
+    # Verificar token do GitHub
+    print_info "Verificando credenciais..."
+    if ! curl -s -H "Authorization: token $github_token" \
+        "https://api.github.com/user" | jq -e '.login' > /dev/null; then
+        print_error "Token do GitHub inválido"
+        return 1
+    fi
+
+    local TEMP_DIR="/tmp/gitlab-repos-backup-$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$TEMP_DIR"
+    cd "$TEMP_DIR" || exit 1
+
+    # Inicializar repositório Git para o backup
+    git init
+    git config user.email "gitlab-backup@local"
+    git config user.name "GitLab Backup"
+    git checkout -b main
+
+    # Criar diretório para os repos
+    mkdir -p repos
+
+    # Obter token do GitLab do container
+    print_info "Obtendo token do GitLab..."
+    GITLAB_TOKEN=$(docker exec $(docker ps -q -f name=gitlab) gitlab-rails runner "puts User.where(admin: true).first.personal_access_tokens.first.token" 2>/dev/null)
+
+    if [ -z "$GITLAB_TOKEN" ]; then
+        print_error "Não foi possível obter o token do GitLab"
+        cd /
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
+
+    # Função para clonar um repositório e suas branches
+    clone_repository() {
+        local project_id=$1
+        local project_path=$2
+        
+        print_info "Clonando repositório: $project_path"
+        
+        # Criar diretório para o projeto
+        mkdir -p "repos/$project_path"
+        cd "repos/$project_path" || return 1
+        
+        # Clonar o repositório
+        if ! git clone --mirror "http://oauth2:${GITLAB_TOKEN}@localhost/${project_path}.git" .; then
+            print_error "Falha ao clonar $project_path"
+            return 1
+        fi
+        
+        # Atualizar todas as refs
+        git remote update
+        
+        cd "$TEMP_DIR" || return 1
+    }
+
+    # Listar e clonar todos os repositórios
+    print_info "Obtendo lista de projetos..."
+    docker exec $(docker ps -q -f name=gitlab) gitlab-rails runner '
+        Project.all.each do |project|
+            puts "#{project.id}|#{project.path_with_namespace}"
+        end
+    ' | while IFS='|' read -r project_id project_path; do
+        clone_repository "$project_id" "$project_path"
+    done
+
+    # Verificar se há repositórios para backup
+    if [ -z "$(ls -A repos)" ]; then
+        print_error "Nenhum repositório encontrado para backup"
+        cd /
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
+
+    # Adicionar todos os repositórios ao Git
+    print_info "Preparando backup..."
+    cd "$TEMP_DIR" || exit 1
+    git add .
+    git commit -m "Backup dos repositórios GitLab - $(date +%Y%m%d_%H%M%S)"
+
+    # Enviar para GitHub
+    print_info "Enviando para GitHub..."
+    git remote add origin "https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git"
+    if ! git push -u origin main --force; then
+        print_error "Falha ao enviar para o GitHub"
+        cd /
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
+
+    # Limpar
+    cd /
+    rm -rf "$TEMP_DIR"
+
+    print_success "Backup dos repositórios concluído com sucesso!"
 }
 
 # Criar backup
@@ -297,6 +415,9 @@ handle_backup() {
         "github-list")
             list_github_backups "$@"
             ;;
+        "github-now")
+            execute_backup_now "$@"
+            ;;
         *)
             print_error "Ação de backup desconhecida: $action"
             print_info "Ações disponíveis:"
@@ -306,6 +427,7 @@ handle_backup() {
             print_info "  clean [DIAS]            - Limpar backups antigos"
             print_info "  github-setup            - Configurar backup GitHub"
             print_info "  github-list             - Listar backups no GitHub"
+            print_info "  github-now              - Executar backup imediatamente"
             return 1
             ;;
     esac
